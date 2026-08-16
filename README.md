@@ -1,5 +1,7 @@
 # Parsec Android Mod - Touchpad, Stylus, Zoom & Portrait
 
+_100% vibecoded_
+
 A feature mod for the Parsec Android client (`tv.parsec.client`). Adds touchpad mode, S Pen stylus mouse emulation, pinch-to-zoom, and portrait orientation lock.
 
 ## Features
@@ -11,7 +13,7 @@ A feature mod for the Parsec Android client (`tv.parsec.client`). Adds touchpad 
 - Works automatically, no toggle needed
 
 ### Touchpad Mode
-- Toggle: panel button "Тачпад"
+- Toggle: panel button "Touchpad"
 - **1 finger** moves the cursor (relative, like a real touchpad - cursor stays in place when you lift and reposition)
 - **Tap** = left click at cursor position
 - **Double-tap + hold** = drag (tap quickly twice, hold on second tap, move to drag)
@@ -21,7 +23,7 @@ A feature mod for the Parsec Android client (`tv.parsec.client`). Adds touchpad 
 - Cursor overlay shows the real Windows cursor bitmap (sent by host)
 
 ### Pinch-to-Zoom
-- Toggle: panel button "Зум"
+- Toggle: panel button "Zoom"
 - Pinch with 2 fingers to zoom in/out
 - 2 fingers move = pan when zoomed
 - 3 fingers = scroll
@@ -29,7 +31,7 @@ A feature mod for the Parsec Android client (`tv.parsec.client`). Adds touchpad 
 - Keyboard safe: zoom resets when keyboard opens, function keys stay anchored
 
 ### Portrait Orientation Lock
-- Toggle: panel button "Портрет"
+- Toggle: panel button "Portrait"
 - Forces portrait orientation (like AnyDesk - stream on top, keyboard space below)
 - Works with all resolutions
 - Native orientation settings cannot override it while enabled
