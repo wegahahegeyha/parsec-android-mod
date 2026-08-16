@@ -73,8 +73,10 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
     private long downTime = 0L;
     private boolean fingerMoved = false;
     private boolean dragMode = false;
+    private boolean dragButtonPressed = false;
     private boolean wasMultiTouch = false;
     private boolean touchStartInCorner = false;
+    private boolean inStream = false;
     private boolean inSession = true;
     private long lastTapTime = 0L;
     private float lastTapX = 0.0f;
@@ -220,7 +222,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         });
 
         this.touchpadBtn = new Button(getContext());
-        this.touchpadBtn.setText("Тачпад");
+        this.touchpadBtn.setText("Touchpad");
         this.touchpadBtn.setTextSize(14.0f);
         this.touchpadBtn.setAllCaps(false);
         this.touchpadBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
@@ -233,7 +235,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         });
 
         this.zoomBtn = new Button(getContext());
-        this.zoomBtn.setText("Зум");
+        this.zoomBtn.setText("Zoom");
         this.zoomBtn.setTextSize(14.0f);
         this.zoomBtn.setAllCaps(false);
         this.zoomBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
@@ -246,7 +248,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         });
 
         this.orientBtn = new Button(getContext());
-        this.orientBtn.setText("Портрет");
+        this.orientBtn.setText("Portrait");
         this.orientBtn.setTextSize(14.0f);
         this.orientBtn.setAllCaps(false);
         this.orientBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
@@ -292,7 +294,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         if (this.portraitMode) {
             this.activity.setRequestedOrientation(1); // SCREEN_ORIENTATION_PORTRAIT
         } else {
-            this.activity.setRequestedOrientation(-1); // SCREEN_ORIENTATION_UNSPECIFIED
+            this.activity.setRequestedOrientation(6); // SCREEN_ORIENTATION_LANDSCAPE
         }
         refreshButtons();
     }
@@ -495,12 +497,10 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         }
         if (pc == 2) {
             // 2-finger pinch-zoom + pan
-            if (keyboardIsShowing()) {
-                return true; // no zoom/pan while keyboard is open
-            }
             // if a drag was in progress, release the button
             if (this.dragMode) {
                 this.dragMode = false;
+                this.dragButtonPressed = false;
                 if (this.cursorX >= 0.0f) {
                     app_mouse_button(false, 1, this.cursorX, this.cursorY);
                 }
@@ -546,11 +546,14 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                     long sinceLast = SystemClock.uptimeMillis() - this.lastTapTime;
                     float dist = Math.abs(e.getX(0) - this.lastTapX) + Math.abs(e.getY(0) - this.lastTapY);
                     if (sinceLast < 300L && dist < dpf(20.0f)) {
-                        // start drag
+                        // second tap: enter drag mode, but DON'T press button yet
+                        // (button press on first MOVE to avoid double-click)
                         this.dragMode = true;
+                        this.dragButtonPressed = false;
                         this.lastTapTime = 0L;
+                        this.lastX = e.getX(0);
+                        this.lastY = e.getY(0);
                         initCursorIfNeeded();
-                        app_mouse_button(true, 1, this.cursorX, this.cursorY);
                         syncTouchpadOverlay();
                         return true;
                     }
@@ -563,6 +566,42 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                     this.lastY = e.getY(0);
                     this.wasMultiTouch = false;
                     this.fingerMoved = true;
+                    return true;
+                }
+                if (this.dragMode && !this.dragButtonPressed) {
+                    // first move after drag start - press button on movement threshold
+                    float mx = e.getX(0);
+                    float my = e.getY(0);
+                    float dx = mx - this.lastX;
+                    float dy = my - this.lastY;
+                    this.lastX = mx;
+                    this.lastY = my;
+                    if (Math.abs(dx) + Math.abs(dy) > dpf(2.0f)) {
+                        this.dragButtonPressed = true;
+                        initCursorIfNeeded();
+                        app_mouse_button(true, 1, this.cursorX, this.cursorY);
+                        this.cursorX = clamp(this.cursorX + dx / this.zoomScale, 0.0f, (float) getWidth());
+                        this.cursorY = clamp(this.cursorY + dy / this.zoomScale, 0.0f, (float) getHeight());
+                        syncTouchpadOverlay();
+                        app_mouse_motion(false, this.cursorX, this.cursorY);
+                    }
+                    return true;
+                }
+                if (this.dragMode && this.dragButtonPressed) {
+                    float mx = e.getX(0);
+                    float my = e.getY(0);
+                    float dx = mx - this.lastX;
+                    float dy = my - this.lastY;
+                    this.lastX = mx;
+                    this.lastY = my;
+                    if (dx != 0.0f || dy != 0.0f) {
+                        this.fingerMoved = true;
+                        initCursorIfNeeded();
+                        this.cursorX = clamp(this.cursorX + dx / this.zoomScale, 0.0f, (float) getWidth());
+                        this.cursorY = clamp(this.cursorY + dy / this.zoomScale, 0.0f, (float) getHeight());
+                        syncTouchpadOverlay();
+                        app_mouse_motion(false, this.cursorX, this.cursorY);
+                    }
                     return true;
                 }
                 float mx = e.getX(0);
@@ -590,8 +629,21 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                 }
                 if (this.dragMode) {
                     this.dragMode = false;
-                    initCursorIfNeeded();
-                    app_mouse_button(false, 1, this.cursorX, this.cursorY);
+                    if (this.dragButtonPressed) {
+                        // drag ended: release button
+                        this.dragButtonPressed = false;
+                        initCursorIfNeeded();
+                        app_mouse_button(false, 1, this.cursorX, this.cursorY);
+                    } else {
+                        // double-tap without movement = double-click
+                        this.dragButtonPressed = false;
+                        initCursorIfNeeded();
+                        app_mouse_button(true, 1, this.cursorX, this.cursorY);
+                        app_mouse_button(false, 1, this.cursorX, this.cursorY);
+                        this.lastTapTime = SystemClock.uptimeMillis();
+                        this.lastTapX = e.getX(0);
+                        this.lastTapY = e.getY(0);
+                    }
                     return true;
                 }
                 long dur = SystemClock.uptimeMillis() - this.downTime;
@@ -618,6 +670,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
             case MotionEvent.ACTION_CANCEL:
                 if (this.dragMode) {
                     this.dragMode = false;
+                    this.dragButtonPressed = false;
                     if (this.cursorX >= 0.0f) {
                         app_mouse_button(false, 1, this.cursorX, this.cursorY);
                     }
@@ -649,12 +702,10 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         }
         if (pc == 2) {
             // 2-finger pinch-zoom + pan
-            if (keyboardIsShowing()) {
-                return true; // no zoom/pan while keyboard is open
-            }
             // if a drag was in progress, release the button
             if (this.dragMode) {
                 this.dragMode = false;
+                this.dragButtonPressed = false;
                 if (this.cursorX >= 0.0f) {
                     app_mouse_button(false, 1, this.cursorX, this.cursorY);
                 }
@@ -730,6 +781,13 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         }
         int action = motionEvent.getActionMasked();
         int pc = motionEvent.getPointerCount();
+        // Not in a stream (PC selection screen): pass through to native, no mod features
+        if (!this.inStream) {
+            this.detector.onTouchEvent(motionEvent);
+            this.sdetector.onTouchEvent(motionEvent);
+            app_unhandled_touch(motionEvent.getActionMasked(), mapX(motionEvent.getX(0)), mapY(motionEvent.getY(0)), pc);
+            return true;
+        }
         // Parsec button corner: forward to native (button must work), toggle panel on UP
         if (pc == 1) {
             float x = motionEvent.getX(0);
@@ -752,9 +810,6 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                 }
                 // MOVE/CANCEL in corner: consume
                 return true;
-            }
-            if (action == MotionEvent.ACTION_UP && this.panelVisible) {
-                hidePanel();
             }
         } else {
             this.touchStartInCorner = false;
@@ -965,9 +1020,6 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         if (!this.zoomEnabled && !this.touchpadMode) {
             return true;
         }
-        if (keyboardIsShowing()) {
-            return true; // don't zoom while keyboard is open (function keys must stay put)
-        }
         float factor = scaleGestureDetector.getScaleFactor();
         if (Float.isNaN(factor) || Float.isInfinite(factor)) {
             return true;
@@ -1124,6 +1176,9 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
     }
 
     void setCursorBitmap(final Bitmap bitmap, final float f, final float f2) {
+        if (bitmap != null) {
+            this.inStream = true;
+        }
         this.activity.runOnUiThread(new Runnable() {
             @Override // java.lang.Runnable
             public void run() {
@@ -1254,13 +1309,6 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
             inputMethodManager.hideSoftInputFromWindow(getWindowToken(), 0, null);
         }
         this.kbShowing = z;
-        // MOD: reset zoom when keyboard opens so function keys stay anchored
-        if (z && this.zoomScale > 1.0f) {
-            this.zoomScale = 1.0f;
-            this.zoomOffsetX = 0.0f;
-            this.zoomOffsetY = 0.0f;
-            applyZoom();
-        }
     }
 
     public int getOrientation() {
@@ -1275,11 +1323,6 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         this.activity.runOnUiThread(new Runnable() {
             @Override // java.lang.Runnable
             public void run() {
-                if (Matoya.this.portraitMode) {
-                    // keep portrait locked when portrait mode is on
-                    Matoya.this.activity.setRequestedOrientation(1);
-                    return;
-                }
                 int i2 = i;
                 if (i2 == 1) {
                     Matoya.this.activity.setRequestedOrientation(6);
