@@ -72,6 +72,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
     private float lastY = 0.0f;
     private long downTime = 0L;
     private boolean fingerMoved = false;
+    private float totalMove = 0.0f;
     private boolean dragMode = false;
     private boolean dragButtonPressed = false;
     private boolean wasMultiTouch = false;
@@ -541,13 +542,13 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                 this.lastY = e.getY(0);
                 this.downTime = SystemClock.uptimeMillis();
                 this.fingerMoved = false;
+                this.totalMove = 0.0f;
                 // check for double-tap to start drag
                 if (this.lastTapTime != 0L) {
                     long sinceLast = SystemClock.uptimeMillis() - this.lastTapTime;
                     float dist = Math.abs(e.getX(0) - this.lastTapX) + Math.abs(e.getY(0) - this.lastTapY);
-                    if (sinceLast < 300L && dist < dpf(20.0f)) {
-                        // second tap: enter drag mode, but DON'T press button yet
-                        // (button press on first MOVE to avoid double-click)
+                    if (sinceLast < 400L && dist < dpf(150.0f)) {
+                        // second tap: enter drag mode, press button on first MOVE
                         this.dragMode = true;
                         this.dragButtonPressed = false;
                         this.lastTapTime = 0L;
@@ -569,15 +570,16 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                     return true;
                 }
                 if (this.dragMode && !this.dragButtonPressed) {
-                    // first move after drag start - press button on movement threshold
+                    // first move after drag start - press button on movement
                     float mx = e.getX(0);
                     float my = e.getY(0);
                     float dx = mx - this.lastX;
                     float dy = my - this.lastY;
                     this.lastX = mx;
                     this.lastY = my;
-                    if (Math.abs(dx) + Math.abs(dy) > dpf(2.0f)) {
+                    if (dx != 0.0f || dy != 0.0f) {
                         this.dragButtonPressed = true;
+                        this.fingerMoved = true;
                         initCursorIfNeeded();
                         app_mouse_button(true, 1, this.cursorX, this.cursorY);
                         this.cursorX = clamp(this.cursorX + dx / this.zoomScale, 0.0f, (float) getWidth());
@@ -611,7 +613,8 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
                 this.lastX = mx;
                 this.lastY = my;
                 if (dx != 0.0f || dy != 0.0f) {
-                    if (Math.abs(dx) + Math.abs(dy) > dpf(0.5f)) {
+                    this.totalMove += Math.abs(dx) + Math.abs(dy);
+                    if (this.totalMove > dpf(TAP_SLOP_DP)) {
                         this.fingerMoved = true;
                     }
                     initCursorIfNeeded();
@@ -1017,7 +1020,7 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
 
     @Override // android.view.ScaleGestureDetector.OnScaleGestureListener
     public boolean onScale(ScaleGestureDetector scaleGestureDetector) {
-        if (!this.zoomEnabled && !this.touchpadMode) {
+        if (!this.zoomEnabled) {
             return true;
         }
         float factor = scaleGestureDetector.getScaleFactor();
