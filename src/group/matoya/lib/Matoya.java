@@ -1,9 +1,13 @@
 package group.matoya.lib;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
+import android.content.DialogInterface;
+import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -18,6 +22,9 @@ import android.os.Vibrator;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
+import android.view.LayoutInflater;
+import android.widget.EditText;
+import android.widget.Toast;
 import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.InputDevice;
@@ -100,6 +107,65 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
     private Button zoomBtn;
     private Button orientBtn;
     private boolean portraitMode = false;
+
+    // --- MOD: resolution menu ---
+    private boolean resMenuVisible = false;
+    private LinearLayout resPanel;
+    private Button resBtn;
+    private int customWidth = 0;
+    private int customHeight = 0;
+    private int selectedResIndex = -1;
+    private SharedPreferences prefs;
+    private static final String PREFS_NAME = "parsec_mod_res";
+
+    // Resolution presets: {width, height, label}
+    // Original ratio 16:9, new 19.5:9 (S24 Ultra), portrait 3:4, custom
+    private static final int[][] RES_PRESETS = {
+        {3840, 2160}, // 16:9 Ultra HD
+        {2560, 1440}, // 16:9 QHD
+        {1920, 1080}, // 16:9 Full HD
+        {1680, 945},  // 16:9
+        {1600, 900},  // 16:9
+        {1366, 768},  // 16:9
+        {1280, 720},  // 16:9
+        {2560, 1182}, // 19.5:9
+        {1920, 886},  // 19.5:9
+        {1680, 776},  // 19.5:9 (S24 Ultra, ~87% of 1080p)
+        {1600, 738},  // 19.5:9
+        {1440, 665},  // 19.5:9
+        {1280, 591},  // 19.5:9
+        // Portrait / tall for landscape phone with keyboard gap
+        {1440, 1080}, // 4:3 portrait-style (38% keyboard gap)
+        {1280, 960},  // 4:3
+        {1080, 810},  // 4:3
+        {900, 675},   // 4:3
+    };
+
+    private static final float[] RES_ASPECTS = {
+        16f/9f, 16f/9f, 16f/9f, 16f/9f, 16f/9f, 16f/9f, 16f/9f,
+        19.5f/9f, 19.5f/9f, 19.5f/9f, 19.5f/9f, 19.5f/9f, 19.5f/9f,
+        4f/3f, 4f/3f, 4f/3f, 4f/3f,
+    };
+
+    private static final String[] RES_LABELS = {
+        "3840x2160 (16:9)",
+        "2560x1440 (16:9)",
+        "1920x1080 (16:9)",
+        "1680x945 (16:9)",
+        "1600x900 (16:9)",
+        "1366x768 (16:9)",
+        "1280x720 (16:9)",
+        "2560x1182 (19.5:9)",
+        "1920x886 (19.5:9)",
+        "1680x776 (19.5:9)",
+        "1600x738 (19.5:9)",
+        "1440x665 (19.5:9)",
+        "1280x591 (19.5:9)",
+        "1440x1080 (4:3)",
+        "1280x960 (4:3)",
+        "1080x810 (4:3)",
+        "900x675 (4:3)",
+    };
 
     private static final float MAX_ZOOM = 4.0f;
     private static final float TAP_SLOP_DP = 8.0f;
@@ -260,9 +326,50 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
             }
         });
 
+        // --- MOD: resolution sub-panel ---
+        this.prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.customWidth = this.prefs.getInt("custom_w", 0);
+        this.customHeight = this.prefs.getInt("custom_h", 0);
+        this.selectedResIndex = this.prefs.getInt("res_index", -1);
+
+        this.resBtn = new Button(getContext());
+        this.resBtn.setText("Resolution");
+        this.resBtn.setTextSize(14.0f);
+        this.resBtn.setAllCaps(false);
+        this.resBtn.setPadding(dp(10), dp(4), dp(10), dp(4));
+        this.resBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Matoya.this.toggleResMenu();
+            }
+        });
+
         this.panel.addView(this.touchpadBtn);
         this.panel.addView(this.zoomBtn);
         this.panel.addView(this.orientBtn);
+        this.panel.addView(this.resBtn);
+
+        // Build hidden resolution sub-menu
+        this.resPanel = new LinearLayout(getContext());
+        this.resPanel.setOrientation(LinearLayout.VERTICAL);
+        this.resPanel.setBackgroundColor(0xCC1E1E1E);
+        this.resPanel.setPadding(dp(8), dp(8), dp(8), dp(8));
+        this.resPanel.setVisibility(View.GONE);
+        buildResPresetButtons();
+        // Custom row
+        Button customBtn = new Button(getContext());
+        customBtn.setText("Custom...");
+        customBtn.setTextSize(13.0f);
+        customBtn.setAllCaps(false);
+        customBtn.setPadding(dp(8), dp(3), dp(8), dp(3));
+        customBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Matoya.this.showCustomDialog();
+            }
+        });
+        this.resPanel.addView(customBtn);
+        this.panel.addView(this.resPanel);
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         if (isLandscape()) {
@@ -288,6 +395,132 @@ public class Matoya extends SurfaceView implements SurfaceHolder.Callback, Input
         this.zoomBtn.setTextColor(this.zoomEnabled ? Color.WHITE : Color.LTGRAY);
         this.orientBtn.setBackgroundColor(this.portraitMode ? Color.parseColor("#2E7D32") : Color.parseColor("#555555"));
         this.orientBtn.setTextColor(this.portraitMode ? Color.WHITE : Color.LTGRAY);
+        this.resBtn.setBackgroundColor(this.resMenuVisible ? Color.parseColor("#2E7D32") : Color.parseColor("#555555"));
+        this.resBtn.setTextColor(Color.WHITE);
+    }
+
+    // --- MOD: resolution menu ---
+    private void buildResPresetButtons() {
+        this.resPanel.removeAllViews();
+        for (int i = 0; i < RES_PRESETS.length; i++) {
+            final int idx = i;
+            Button b = new Button(getContext());
+            b.setText(RES_LABELS[i]);
+            b.setTextSize(12.0f);
+            b.setAllCaps(false);
+            b.setPadding(dp(6), dp(2), dp(6), dp(2));
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Matoya.this.selectResPreset(idx);
+                }
+            });
+            if (this.selectedResIndex == i) {
+                b.setBackgroundColor(Color.parseColor("#2E7D32"));
+                b.setTextColor(Color.WHITE);
+            } else {
+                b.setBackgroundColor(Color.parseColor("#3A3A3A"));
+                b.setTextColor(Color.LTGRAY);
+            }
+            this.resPanel.addView(b);
+        }
+        // Re-add custom button at the end
+        Button customBtn = new Button(getContext());
+        customBtn.setText("Custom...");
+        customBtn.setTextSize(13.0f);
+        customBtn.setAllCaps(false);
+        customBtn.setPadding(dp(8), dp(3), dp(8), dp(3));
+        customBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Matoya.this.showCustomDialog();
+            }
+        });
+        this.resPanel.addView(customBtn);
+    }
+
+    private void selectResPreset(int idx) {
+        if (idx >= 0 && idx < RES_PRESETS.length) {
+            this.selectedResIndex = idx;
+            saveRes(idx, RES_PRESETS[idx][0], RES_PRESETS[idx][1]);
+            applyResolution(RES_PRESETS[idx][0], RES_PRESETS[idx][1]);
+            // Highlight selection
+            buildResPresetButtons();
+            refreshButtons();
+        }
+    }
+
+    private void applyResolution(int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        Toast.makeText(getContext(), "Apply " + w + "x" + h, Toast.LENGTH_SHORT).show();
+        gfx_resize(w, h);
+    }
+
+    private void showCustomDialog() {
+        // Ask width, compute height by ratio, save
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle("Custom Resolution");
+        builder.setMessage("Enter width (e.g. 1680). Height computed by aspect (default 19.5:9).");
+        final EditText input = new EditText(getContext());
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setHint("Width");
+        builder.setView(input);
+        builder.setPositiveButton("OK", null);
+        builder.setNegativeButton("Cancel", null);
+        final AlertDialog dialog = builder.create();
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(final android.content.DialogInterface d) {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        String str = input.getText().toString().trim();
+                        if (str.isEmpty()) { return; }
+                        try {
+                            int w = Integer.parseInt(str);
+                            if (w < 400 || w > 4000) {
+                                Toast.makeText(getContext(), "Width must be 400-4000", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            // Compute height by 19.5:9 ratio, ensure even
+                            int h = (int) Math.round((float) w * 9.0f / 19.5f);
+                            if (h % 2 != 0) h--;
+                            Matoya.this.customWidth = w;
+                            Matoya.this.customHeight = h;
+                            Matoya.this.selectedResIndex = -1;
+                            Matoya.this.saveRes(-1, w, h);
+                            Matoya.this.applyResolution(w, h);
+                            Matoya.this.buildResPresetButtons();
+                            Matoya.this.refreshButtons();
+                            d.dismiss();
+                        } catch (NumberFormatException e) {
+                            Toast.makeText(getContext(), "Invalid number", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+            }
+        });
+        dialog.show();
+    }
+
+    private void saveRes(int idx, int w, int h) {
+        this.prefs.edit().putInt("res_index", idx).putInt("custom_w", w).putInt("custom_h", h).apply();
+    }
+
+    private void toggleResMenu() {
+        if (this.resPanel == null) return;
+        if (this.resPanel.getVisibility() == View.VISIBLE) {
+            this.resPanel.setVisibility(View.GONE);
+            this.resMenuVisible = false;
+        } else {
+            // If custom was selected, show it in menu
+            if (this.selectedResIndex >= 0) {
+                buildResPresetButtons();
+            }
+            this.resPanel.setVisibility(View.VISIBLE);
+            this.resMenuVisible = true;
+        }
+        refreshButtons();
     }
 
     private void togglePortraitMode() {
